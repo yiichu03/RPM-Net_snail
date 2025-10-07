@@ -16,8 +16,8 @@ import torch
 import open3d as o3d
 '''
 # 选第0帧做 source，第1帧做 ref；自动估半径；保存可视化
-python infer_single_pair.py --h5 radar_single_frames/radar_single_frames_test0.h5   --resume D:\AA_projects_in_nus\nus\deep_sparse_radar_odometry\code\checkpoints\partial-trained.pth   --src 0 --ref 1 --num_iter 5 --auto_radius --neighbors 30 --save_vis
-
+python infer_single_pair.py --h5 radar_single_frames_original/radar_single_frames_test0.h5   --resume D:\AA_projects_in_nus\nus\deep_sparse_radar_odometry\code\checkpoints\partial-trained.pth   --src 0 --ref 3 --num_iter 10 --auto_radius --neighbors 50 --save_vis
+python infer_single_pair.py --h5 radar_single_frames_original/radar_single_frames_test0.h5  --resume D:\AA_projects_in_nus\nus\deep_sparse_radar_odometry\code\checkpoints\partial-trained.pth  --src 0 --ref 3 --num_iter 10 --auto_radius --neighbors 50 --save_vis
 '''
 # --- utils -------------------------------------------------------------------
 
@@ -95,16 +95,36 @@ def main():
     else:
         device = torch.device('cpu')
 
-    # load frames
+    # load frames (支持固定点数和可变点数两种格式)
     with h5py.File(args.h5, 'r') as f:
-        data = np.asarray(f['data'])           # (F, 1024, 3)
-        normals = np.asarray(f['normal'])      # (F, 1024, 3)
-    assert args.src < len(data) and args.ref < len(data), "src/ref index out of range"
+        # 检查是否是可变点数格式
+        variable_points = f.attrs.get('variable_points', False)
+        
+        if variable_points:
+            # 可变点数格式：每帧单独存储
+            num_frames = f.attrs['num_frames']
+            assert args.src < num_frames and args.ref < num_frames, "src/ref index out of range"
+            
+            xyz_src = np.asarray(f[f'data_{args.src}']).astype(np.float32)
+            xyz_ref = np.asarray(f[f'data_{args.ref}']).astype(np.float32)
+            n_src = np.asarray(f[f'normal_{args.src}']).astype(np.float32)
+            n_ref = np.asarray(f[f'normal_{args.ref}']).astype(np.float32)
+            
+            print(f"Loaded variable-size frames:")
+            print(f"  Source frame {args.src}: {len(xyz_src)} points")
+            print(f"  Reference frame {args.ref}: {len(xyz_ref)} points")
+        else:
+            # 固定点数格式：标准数组
+            data = np.asarray(f['data'])           # (F, N, 3)
+            normals = np.asarray(f['normal'])      # (F, N, 3)
+            assert args.src < len(data) and args.ref < len(data), "src/ref index out of range"
 
-    xyz_src = data[args.src].astype(np.float32)
-    xyz_ref = data[args.ref].astype(np.float32)
-    n_src =  normals[args.src].astype(np.float32)
-    n_ref =  normals[args.ref].astype(np.float32)
+            xyz_src = data[args.src].astype(np.float32)
+            xyz_ref = data[args.ref].astype(np.float32)
+            n_src = normals[args.src].astype(np.float32)
+            n_ref = normals[args.ref].astype(np.float32)
+            
+            print(f"Loaded fixed-size frames: {len(xyz_src)} points each")
 
     if args.align_normals:
         n_src = flip_normals_outward(xyz_src, n_src)
@@ -151,9 +171,42 @@ def main():
         'points_ref': to_tensor(pts_ref6, device)
     }
 
+    # Prepare output directory
+    out_dir = os.path.dirname(os.path.abspath(args.h5))
+
     with torch.no_grad():
         transforms, endpoints = model(batch, rpm_args.num_reg_iter)
     
+    # Save detailed results for visualization
+    if args.save_vis:
+        import pickle
+        from scipy import sparse
+        
+        # Save transforms in eval format: (1, n_iter, 3, 4)
+        transforms_np = torch.stack(transforms, dim=1).detach().cpu().numpy()  # (1, n_iter, 3, 4)
+        pred_transforms_path = os.path.join(out_dir, 'pred_transforms.npy')
+        np.save(pred_transforms_path, transforms_np)
+        print(f"Saved pred_transforms.npy: shape {transforms_np.shape}")
+        
+        # Save permutation matrices in eval format
+        if 'perm_matrices' in endpoints:
+            perm_matrices = torch.stack(endpoints['perm_matrices'], dim=1).detach().cpu().numpy()  # (1, n_iter, J, K)
+            
+            # Convert to sparse format (same as eval.py)
+            thresh = np.percentile(perm_matrices, 99.9, axis=[2, 3])
+            below_thresh_mask = perm_matrices < thresh[:, :, None, None]
+            perm_matrices[below_thresh_mask] = 0.0
+            
+            # Create sparse matrices list
+            sparse_perm_matrices_list = []
+            for i_iter in range(perm_matrices.shape[1]):
+                sparse_perm_matrices_list.append(sparse.coo_matrix(perm_matrices[0, i_iter, :, :]))
+            
+            # Save as pickle (list of sparse matrices for one sample)
+            perm_matrices_path = os.path.join(out_dir, 'perm_matrices.pickle')
+            with open(perm_matrices_path, 'wb') as f:
+                pickle.dump([sparse_perm_matrices_list], f)  # Wrap in list for consistency
+            print(f"Saved perm_matrices.pickle: {len(sparse_perm_matrices_list)} iterations")
 
     T_last = transforms[-1][0]   # (3,4) torch
     T_np = T_last.detach().cpu().numpy()
@@ -172,7 +225,17 @@ def main():
 
     # optional visualization save
     if args.save_vis:
-        out_dir = os.path.dirname(os.path.abspath(args.h5))
+        # Save data dict for visualization (original points without transform)
+        data_dict = {
+            'points_src': xyz_src,
+            'points_ref': xyz_ref,
+            'normals_src': n_src,
+            'normals_ref': n_ref
+        }
+        data_dict_path = os.path.join(out_dir, 'data_dict.npy')
+        np.save(data_dict_path, data_dict, allow_pickle=True)
+        print(f"Saved data_dict.npy for visualization")
+        
         # before
         p_src = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(xyz_src))
         p_src.paint_uniform_color([1, 0.2, 0.2])

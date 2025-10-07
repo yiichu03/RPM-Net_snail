@@ -18,10 +18,20 @@ def convert_single_radar_frames(
     frame_indices: list = [0, 10, 20],  # 选择第0、10、20帧
     downsample_points: int = 1024,
     k_normal: int = 20,
-    log_filename: str = "normals_log.txt"
+    log_filename: str = "normals_log.txt",
+    keep_original_points: bool = False  # 新增：保留原始点数，不下采样
 ):
     """
     转换选定的雷达帧为RPM-Net格式，并记录法向量估计日志
+    
+    Args:
+        radar_dir: 输入PCD文件目录
+        output_dir: 输出HDF5文件目录
+        frame_indices: 要转换的帧索引列表
+        downsample_points: 下采样目标点数（如果keep_original_points=False）
+        k_normal: 法向量估计的KNN邻居数
+        log_filename: 日志文件名
+        keep_original_points: 如果为True，保留原始点数；如果为False，下采样到downsample_points
     """
     print("=== 步骤1: 数据转换 ===")
 
@@ -48,6 +58,16 @@ def convert_single_radar_frames(
     chosen_names = [pcd_files[i].name for i in frame_indices if i < len(pcd_files)]
     print(f"选择帧: {chosen_names}")
     write_log(log_path, f"选择帧: {chosen_names}")
+    
+    # 保存frame_indices到文件名的映射
+    frame_mapping_path = os.path.join(output_dir, 'frame_indices_mapping.txt')
+    with open(frame_mapping_path, 'w', encoding='utf-8') as f:
+        f.write("# Frame Index -> PCD Filename Mapping\n")
+        f.write(f"# Total frames selected: {len(selected_files)}\n")
+        f.write(f"# Original frame indices: {frame_indices}\n\n")
+        for original_idx, pcd_file in zip([frame_indices[i] for i in range(len(selected_files))], selected_files):
+            f.write(f"{original_idx}\t{pcd_file.name}\n")
+    print(f"Frame mapping saved to: {frame_mapping_path}")
 
     # 3. 处理选定的帧
     all_point_clouds = []
@@ -73,20 +93,25 @@ def convert_single_radar_frames(
         print(f"  原始点数: {len(points)}")
         write_log(log_path, f"  原始点数: {len(points)}")
 
-        # 下采样（不足则重复）
-        if len(points) >= downsample_points:
-            indices = np.random.choice(len(points), downsample_points, replace=False)
-            sampled_points = points[indices]
-            write_log(log_path, f"  随机下采样 {downsample_points} 点（从 {len(points)} 中）")
+        # 下采样或保留原始点数
+        if keep_original_points:
+            sampled_points = points
+            write_log(log_path, f"  保留原始点数: {len(points)}")
+            print(f"  保留原始点数: {len(points)} 点")
         else:
-            repeat_times = downsample_points // len(points)
-            remainder = downsample_points % len(points)
-            sampled_points = np.tile(points, (repeat_times, 1))
-            if remainder > 0:
-                sampled_points = np.vstack([sampled_points, points[:remainder]])
-            write_log(log_path, f"  点不足，重复采样到 {downsample_points} 点（原始 {len(points)}）")
-
-        print(f"  下采样后: {len(sampled_points)} 点")
+            # 下采样（不足则重复）
+            if len(points) >= downsample_points:
+                indices = np.random.choice(len(points), downsample_points, replace=False)
+                sampled_points = points[indices]
+                write_log(log_path, f"  随机下采样 {downsample_points} 点（从 {len(points)} 中）")
+            else:
+                repeat_times = downsample_points // len(points)
+                remainder = downsample_points % len(points)
+                sampled_points = np.tile(points, (repeat_times, 1))
+                if remainder > 0:
+                    sampled_points = np.vstack([sampled_points, points[:remainder]])
+                write_log(log_path, f"  点不足，重复采样到 {downsample_points} 点（原始 {len(points)}）")
+            print(f"  下采样后: {len(sampled_points)} 点")
 
         # 估计法向量（带日志 & 随机掩码）
         normals, is_random_mask = estimate_normals_for_radar(
@@ -110,10 +135,19 @@ def convert_single_radar_frames(
             timestamps.append(float(i))
 
     # 4. 转换为数组格式
-    point_clouds_array = np.array(all_point_clouds)        # (N_frames, 1024, 3)
-    normals_array = np.array(all_normals)                  # (N_frames, 1024, 3)
-    labels_array = np.array(all_labels)                    # (N_frames,)
-    random_mask_array = np.array(all_random_masks)         # (N_frames, 1024)
+    # 注意：如果keep_original_points=True，每帧点数可能不同，需要用object数组
+    if keep_original_points:
+        # 点数可能不同，使用object数组或者单独处理
+        point_clouds_array = np.array(all_point_clouds, dtype=object)
+        normals_array = np.array(all_normals, dtype=object)
+        labels_array = np.array(all_labels)
+        random_mask_array = np.array(all_random_masks, dtype=object)
+    else:
+        # 点数相同，使用标准数组
+        point_clouds_array = np.array(all_point_clouds)        # (N_frames, downsample_points, 3)
+        normals_array = np.array(all_normals)                  # (N_frames, downsample_points, 3)
+        labels_array = np.array(all_labels)                    # (N_frames,)
+        random_mask_array = np.array(all_random_masks)         # (N_frames, downsample_points)
 
     print(f"最终数据形状: points={point_clouds_array.shape}, normals={normals_array.shape}, random_mask={random_mask_array.shape}")
     write_log(log_path, f"最终数据形状: points={point_clouds_array.shape}, normals={normals_array.shape}, random_mask={random_mask_array.shape}")
@@ -121,10 +155,24 @@ def convert_single_radar_frames(
     # 5. 保存HDF5文件
     h5_file = os.path.join(output_dir, 'radar_single_frames_test0.h5')
     with h5py.File(h5_file, 'w') as f:
-        f.create_dataset('data', data=point_clouds_array)
-        f.create_dataset('normal', data=normals_array)
+        if keep_original_points:
+            # 点数不同时，每个帧单独存储为一个dataset
+            for idx, (pts, norms, mask) in enumerate(zip(point_clouds_array, normals_array, random_mask_array)):
+                f.create_dataset(f'data_{idx}', data=pts)
+                f.create_dataset(f'normal_{idx}', data=norms)
+                f.create_dataset(f'normal_is_random_{idx}', data=mask)
+            # 存储元信息
+            f.attrs['num_frames'] = len(point_clouds_array)
+            f.attrs['variable_points'] = True
+            f.attrs['point_counts'] = [len(pts) for pts in point_clouds_array]
+        else:
+            # 点数相同时，使用标准格式
+            f.create_dataset('data', data=point_clouds_array)
+            f.create_dataset('normal', data=normals_array)
+            f.create_dataset('normal_is_random', data=random_mask_array)
+            f.attrs['variable_points'] = False
+        
         f.create_dataset('label', data=labels_array)
-        f.create_dataset('normal_is_random', data=random_mask_array)  # 新增：法向量是否随机
 
     print(f"HDF5文件已保存: {h5_file}")
     write_log(log_path, f"HDF5文件已保存: {h5_file}")
@@ -238,11 +286,24 @@ def estimate_normals_for_radar(points: np.ndarray, k: int = 20, log_path: str = 
 
 # 运行转换
 if __name__ == "__main__":
+    # 示例1: 下采样到固定点数（默认）
+    # convert_single_radar_frames( 
+    #     radar_dir="./eagleg7/enhanced/",
+    #     output_dir="radar_single_frames/",
+    #     frame_indices=[0, 10, 20],  # 选择3帧测试
+    #     downsample_points=1024,
+    #     k_normal=30,
+    #     log_filename="normals_log.txt",
+    #     keep_original_points=False  # 下采样到1024点
+    # )
+    
+    # 示例2: 保留原始点数（取消注释以使用）
     convert_single_radar_frames( 
         radar_dir="./eagleg7/enhanced/",
-        output_dir="radar_single_frames/",
-        frame_indices=[0, 10, 20],  # 选择3帧测试
-        downsample_points=1024,
+        output_dir="radar_single_frames_original/",
+        frame_indices=[0, 10, 20, 50],
+        downsample_points=1024,  # 这个参数在keep_original_points=True时会被忽略
         k_normal=30,
-        log_filename="normals_log.txt"
+        log_filename="normals_log.txt",
+        keep_original_points=True  # 保留原始点数
     )

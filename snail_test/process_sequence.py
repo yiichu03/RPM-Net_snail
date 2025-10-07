@@ -123,14 +123,28 @@ def process_sequence(args):
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
     
-    # Load frames
+    # Load frames (支持固定点数和可变点数两种格式)
     print(f"\nLoading data from: {args.h5}")
     with h5py.File(args.h5, 'r') as f:
-        data = np.asarray(f['data'])
-        normals = np.asarray(f['normal'])
-    
-    n_frames = len(data)
-    print(f"Loaded {n_frames} frames with {data.shape[1]} points each")
+        variable_points = f.attrs.get('variable_points', False)
+        
+        if variable_points:
+            # 可变点数格式
+            n_frames = f.attrs['num_frames']
+            point_counts = f.attrs.get('point_counts', [])
+            data = []
+            normals = []
+            for i in range(n_frames):
+                data.append(np.asarray(f[f'data_{i}']))
+                normals.append(np.asarray(f[f'normal_{i}']))
+            print(f"Loaded {n_frames} frames with variable points:")
+            print(f"  Point counts: {point_counts}")
+        else:
+            # 固定点数格式
+            data = [np.asarray(f['data'][i]) for i in range(len(f['data']))]
+            normals = [np.asarray(f['normal'][i]) for i in range(len(f['normal']))]
+            n_frames = len(data)
+            print(f"Loaded {n_frames} frames with {data[0].shape[0]} points each")
     
     # Load timestamps if available
     h5_dir = Path(args.h5).parent
@@ -191,11 +205,11 @@ def process_sequence(args):
     trajectory = [np.zeros(3)]  # Start at origin
     
     for src_idx, ref_idx in tqdm(pairs, desc="Processing pairs"):
-        # Prepare data
-        xyz_src = data[src_idx].astype(np.float32)
-        xyz_ref = data[ref_idx].astype(np.float32)
-        n_src = normals[src_idx].astype(np.float32)
-        n_ref = normals[ref_idx].astype(np.float32)
+        # Prepare data (已经是list格式，直接使用)
+        xyz_src = np.asarray(data[src_idx]).astype(np.float32)
+        xyz_ref = np.asarray(data[ref_idx]).astype(np.float32)
+        n_src = np.asarray(normals[src_idx]).astype(np.float32)
+        n_ref = np.asarray(normals[ref_idx]).astype(np.float32)
         
         pts_src6 = np.concatenate([xyz_src, n_src], axis=-1)[None, ...]
         pts_ref6 = np.concatenate([xyz_ref, n_ref], axis=-1)[None, ...]
