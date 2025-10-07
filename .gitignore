@@ -12,6 +12,7 @@ snail_test/*.ply
 snail_test/*.pcd
 synthetic_partial/
 synthetic_test/
+snail_test/outputs/
 
 # ModelNet40 dataset
 datasets/modelnet40_ply_hdf5_2048/

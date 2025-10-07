@@ -200,14 +200,16 @@ def inference(data_loader, model: torch.nn.Module):
             # Saves match matrix. We only save the top matches to save storage/time.
             # However, this still takes quite a bit of time to save. Comment out if not needed.
             if 'perm_matrices' in endpoints:
-                perm_matrices = to_numpy(torch.stack(endpoints['perm_matrices'], dim=1))
+                # 1. 把各轮的匹配矩阵堆到同一个数组里 endpoints['perm_matrices'] length = n_iter, 每个元素 (B,J,K)
+                perm_matrices = to_numpy(torch.stack(endpoints['perm_matrices'], dim=1)) # (B, n_iter, J, K)
+                # 2. 保留概率最大的 0.1% 匹配项(即计算J*K的分位数作为阈值)
                 thresh = np.percentile(perm_matrices, 99.9, axis=[2, 3])  # Only retain top 0.1% of entries
                 below_thresh_mask = perm_matrices < thresh[:, :, None, None]
                 perm_matrices[below_thresh_mask] = 0.0
 
-                for i_data in range(perm_matrices.shape[0]):
+                for i_data in range(perm_matrices.shape[0]): # 遍历 batch 中每个样本 b
                     sparse_perm_matrices = []
-                    for i_iter in range(perm_matrices.shape[1]):
+                    for i_iter in range(perm_matrices.shape[1]): # 遍历每个迭代轮次 i
                         sparse_perm_matrices.append(sparse.coo_matrix(perm_matrices[i_data, i_iter, :, :]))
                     endpoints_out['perm_matrices'].append(sparse_perm_matrices)
 
