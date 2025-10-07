@@ -33,7 +33,7 @@ def save_inference_visuals(
     ref_idx: int,
     save_perm: bool = True,     # 是否保存稀疏化的软匹配矩阵
     save_ply: bool = True,      # 保存前/后的 PLY 点云
-    save_data_dict: bool = False,# 保存原始数据字典 numpy
+    save_data_dict: bool = True,# 保存原始数据字典 numpy
     print_report: bool = True   # 打印 R/t 概要
 ):
     """
@@ -72,7 +72,7 @@ def save_inference_visuals(
         below_mask = P_np < thresh[:, :, None, None]
         P_np[below_mask] = 0.0
 
-        # 与 eval.py 保持一致的 pickle 结构（外层按 batch；我们这里 B=1）
+        # 与 eval.py 保持一致的 pickle 结构（外层按 batch；这里 B=1）
         perm_list_batch = []
         B, n_iter = P_np.shape[:2]
         for b in range(B):
@@ -138,3 +138,43 @@ def save_inference_visuals(
         'T_txt': T_txt_path,
         'T_last': T_last
     }
+
+def estimate_normals_for_radar(points: np.ndarray, k: int = 20):
+    """
+    用 Open3D估计法向量。
+    k: KNN邻居数。
+    返回:
+      normals: (N,3) float32
+      is_bad_mask: (N,) bool（非有限或范数极小的法线）
+    """
+    N = points.shape[0]
+    if N == 0:
+        return np.empty((0, 3), np.float32), np.empty((0,), bool)
+    if N < 3:
+        normals = np.zeros((N, 3), np.float32)
+        is_bad_mask = np.ones(N, dtype=bool)
+        print(f"[estimate_normals] N={N} < 3 → all bad")
+        return normals, is_bad_mask
+    
+    # KNN→PCA→取最小特征向量（Open3D 的 estimate_normals 内部完成）
+    pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points.astype(np.float64)))
+    k_eff = max(3, min(k, N)) # 确保KNN邻居数>=3且<=N
+    pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=k_eff))
+    
+    normals = np.asarray(pcd.normals, dtype=np.float32)
+    
+    is_bad_mask = (~np.isfinite(normals).all(axis=1)) | (np.linalg.norm(normals, axis=1) < 1e-12)
+    bad_cnt = int(is_bad_mask.sum())
+    if bad_cnt > 0:
+        print(f"[estimate_normals] N={N}, k_eff={k_eff} -> bad_normals={bad_cnt}/{N} "
+              f"({bad_cnt / N:.2%}), criterion: non-finite or ||n||< 1e-12")
+    else:
+        print(f"[estimate_normals] N={N}, k_eff={k_eff} -> bad_normals=0/{N}")
+    
+    # # 把非有限/几乎为零的法线替换为随机单位向量（如果想这样的话，就把下面三行代码取消注释）
+    # r = np.random.randn(bad_cnt.sum(), 3).astype(np.float32)
+    # r /= (np.linalg.norm(r, axis=1, keepdims=True) + 1e-12)
+    # normals[is_bad_mask] = r
+    
+    
+    return normals, is_bad_mask

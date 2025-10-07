@@ -1,8 +1,7 @@
 from pathlib import Path
 import sys
 
-# infer_single_pair.py 位于 .../RPMNet/snail_test/
-# 我们要把 .../RPMNet/src 加到 PYTHONPATH
+# 把 .../RPMNet/src 加到 PYTHONPATH
 SRC_DIR = Path(__file__).resolve().parents[1] / "src"   # parents[1] == RPMNet
 sys.path.insert(0, str(SRC_DIR))
 
@@ -13,13 +12,8 @@ import numpy as np
 import torch
 import open3d as o3d
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # 让同级 tools.py / convert_radar_single_frames.py 稳定可见
-from tools import save_inference_visuals, apply_se3
-from convert_radar_single_frames import estimate_normals_for_radar
-'''
-# 选第0帧做 source，第1帧做 ref；自动估半径；保存可视化
-python infer_single_pair.py --h5 radar_single_frames_original/radar_single_frames_test0.h5   --resume D:\AA_projects_in_nus\nus\deep_sparse_radar_odometry\code\checkpoints\partial-trained.pth   --src 0 --ref 3 --num_iter 10 --auto_radius --neighbors 50 --save_vis
-python infer_single_pair.py --h5 radar_single_frames_original/radar_single_frames_test0.h5  --resume D:\AA_projects_in_nus\nus\deep_sparse_radar_odometry\code\checkpoints\partial-trained.pth  --src 0 --ref 3 --num_iter 10 --auto_radius --neighbors 50 --save_vis
-'''
+from tools import save_inference_visuals, estimate_normals_for_radar
+
 # --- utils -------------------------------------------------------------------
 
 def to_tensor(x, device):

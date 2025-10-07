@@ -14,73 +14,75 @@
         },
 
         {
-        "name": "Eval RPM-Net (noise=crop)",
-        "type": "debugpy",
-        "request": "launch",
-        "program": "${workspaceFolder}/src/eval.py",   
-        "cwd": "${workspaceFolder}/src",               
-        "args": [
-            "--noise_type", "crop",
-            "--resume", "D:\\AA_projects_in_nus\\nus\\deep_sparse_radar_odometry\\code\\checkpoints\\partial-trained.pth",
-            "--eval_save_path", "../eval_results/rpmnet_crop_debug"
-        ],
-        "console": "integratedTerminal",
-        "justMyCode": false,                            // 需要时可单步进第三方库
-        "subProcess": true                              // 如果有子进程(如多进程DataLoader)便于附加
-        // "env": { "CUDA_VISIBLE_DEVICES": "0" },      // 如需指定GPU可解开
-        // "envFile": "${workspaceFolder}/.env"         // 如有环境变量文件可启用
+            "name": "Eval RPM-Net (noise=crop)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/eval.py",   
+            "cwd": "${workspaceFolder}/src",               
+            "args": [
+                "--noise_type", "crop",
+                "--resume", "D:\\AA_projects_in_nus\\nus\\deep_sparse_radar_odometry\\code\\checkpoints\\partial-trained.pth",
+                "--eval_save_path", "../eval_results/rpmnet_crop_debug"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,                            // 需要时可单步进第三方库
+            "subProcess": true                              // 如果有子进程(如多进程DataLoader)便于附加
+            // "env": { "CUDA_VISIBLE_DEVICES": "0" },      // 如需指定GPU可解开
+            // "envFile": "${workspaceFolder}/.env"         // 如有环境变量文件可启用
+        },       
+        {
+            "name": "Infer single pair (PCD→RPMNet)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/snail_test/infer_from_pcd.py",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": [
+                "--src_pcd", "${workspaceFolder}/snail_test/eagleg7/enhanced/1696641884.835595373.pcd",
+                "--ref_pcd", "${workspaceFolder}/snail_test/eagleg7/enhanced/1696641886.295488599.pcd",
+                // "--ref_pcd", "${workspaceFolder}/snail_test/outputs/1696641899.575806383/1696641899.575806383_R_45.0_45.0_15.0_T_20.0_30.0_0.5.pcd",
+                "--resume", "D:/AA_projects_in_nus/nus/deep_sparse_radar_odometry/code/checkpoints/partial-trained.pth",
+                "--num_iter", "5", // "5",
+                "--auto_radius",
+                // "--radius", "0.3",
+                "--neighbors", "30", // 30 50
+                "--save_vis",
+                "--out_dir", "${workspaceFolder}/snail_test/outputs/pair_1696641884_1696641886"
+                // "--out_dir", "${workspaceFolder}/snail_test/outputs/1696641899.575806383"
+            ]
+        },
+        {
+            "name": "Visualize Radar Registration (progress)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/snail_test/visualize_radar_registration.py",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": [
+                "--results_dir", "${workspaceFolder}/snail_test/outputs/pair_1696641884_1696641886",
+                // "--results_dir", "${workspaceFolder}/snail_test/outputs/1696641899.575806383",
+                // "--mode", "progress", // "progress" 'matching' 'comparison' '3d'
+                "--save", "${workspaceFolder}/snail_test/outputs/pair_1696641884_1696641886/progress.png"
+            ]
+        },
+        {
+            "name": "Create pcd",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/snail_test/create_pcd.py",
+            "cwd": "${workspaceFolder}/snail_test",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": [
+                "--input", "${workspaceFolder}/snail_test/eagleg7/enhanced/1696641899.575806383.pcd",
+                "--output", "${workspaceFolder}/snail_test/outputs/1696641899.575806383",
+                "--rotation", "45", "45", "15",
+                "--translation", "20.0", "30.0", "0.5"
+            ]
         },
 
-        {
-        "name": "Convert Radar Single Frames",
-        "type": "debugpy",
-        "request": "launch",
-        "program": "${workspaceFolder}/snail_test/convert_radar_single_frames.py",
-        "cwd": "${workspaceFolder}/snail_test",
-        "console": "integratedTerminal",
-        "justMyCode": false
-        },
-        {
-        "name": "Infer single pair (RPMNet on SNAIL)",
-        "type": "debugpy",
-        "request": "launch",
-        "program": "${workspaceFolder}/snail_test/infer_single_pair.py",
-        "cwd": "${workspaceFolder}/snail_test",
-        "args": [
-            "--h5", "radar_single_frames_original/radar_single_frames_test0.h5",
-            "--resume", "D:\\AA_projects_in_nus\\nus\\deep_sparse_radar_odometry\\code\\checkpoints\\partial-trained.pth",
-            "--src", "0",
-            "--ref", "3",
-            "--num_iter", "10",
-            "--auto_radius",
-            "--neighbors", "50",
-            "--save_vis"
-        ],
-        "console": "integratedTerminal",
-        "justMyCode": false,
-        "subProcess": true
-        // "env": { "CUDA_VISIBLE_DEVICES": "0" }, // 需要时指定GPU
-        },
-        {
-        "name": "Infer single pair (PCD→RPMNet)",
-        "type": "debugpy",
-        "request": "launch",
-        "program": "${workspaceFolder}/snail_test/infer_from_pcd.py",
-        "cwd": "${workspaceFolder}",
-        "console": "integratedTerminal",
-        "justMyCode": false,
-        "args": [
-            "--src_pcd", "${workspaceFolder}/snail_test/eagleg7/enhanced/1696641884.835595373.pcd",
-            "--ref_pcd", "${workspaceFolder}/snail_test/eagleg7/enhanced/1696641898.565626625.pcd",
-            "--resume", "D:/AA_projects_in_nus/nus/deep_sparse_radar_odometry/code/checkpoints/partial-trained.pth",
-            "--num_iter", "5",
-            "--auto_radius",
-            // "--radius", "0.3",
-            "--neighbors", "30",
-            "--save_vis",
-            "--out_dir", "${workspaceFolder}/snail_test/outputs/pair_1696641884_1696641898"
-        ]
-        }
 
     ]
 }
