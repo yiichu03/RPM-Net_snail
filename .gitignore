@@ -1,3 +1,29 @@
+# ===============================================
+# Radar Data and Results (User added)
+# ===============================================
+# Radar PCD files and converted data
+snail_test/eagleg7/
+snail_test/radar_single_frames/
+snail_test/radar_single_frames_original/
+snail_test/radar_full_sequence/
+snail_test/sequence_results/
+snail_test/full_sequence_results/
+snail_test/*.ply
+snail_test/*.pcd
+synthetic_partial/
+synthetic_test/
+
+# ModelNet40 dataset
+datasets/modelnet40_ply_hdf5_2048/
+
+# Evaluation results
+eval_results/
+
+# Large checkpoint files (uncomment if you don't want to track them)
+# *.pth
+
+# ===============================================
+
 # Created by https://www.gitignore.io/api/linux,macos,python,pycharm
 # Edit at https://www.gitignore.io/?templates=linux,macos,python,pycharm
 

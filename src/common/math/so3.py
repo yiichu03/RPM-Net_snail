@@ -20,7 +20,11 @@ def dcm2euler(mats: np.ndarray, seq: str = 'zyx', degrees: bool = True):
 
     eulers = []
     for i in range(mats.shape[0]):
-        r = Rotation.from_dcm(mats[i])
+        # 兼容新旧 SciPy 的输入接口
+        if hasattr(Rotation, "from_matrix"):
+            r = Rotation.from_matrix(mats.reshape(-1, 3, 3))
+        else:  # 旧版 SciPy （<1.4）
+            r = Rotation.from_dcm(mats.reshape(-1, 3, 3))
         eulers.append(r.as_euler(seq, degrees=degrees))
     return np.stack(eulers)
 

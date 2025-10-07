@@ -30,6 +30,37 @@ from common.math.so3 import dcm2euler
 from data_loader.datasets import get_test_datasets
 import models.rpmnet
 
+def _flatten_for_df(d):
+    out = {}
+    # 推断 N（逐帧条数）
+    N = None
+    for v in d.values():
+        a = np.asarray(v)
+        if a.ndim >= 1:
+            N = a.shape[0]
+            break
+    if N is None:
+        # 都是标量：存成单行
+        return {k: [np.asarray(v).item() if np.asarray(v).ndim == 0 else v] for k, v in d.items()}
+
+    for k, v in d.items():
+        a = np.asarray(v)
+        if a.ndim == 0:
+            out[k] = np.full(N, a.item())
+        elif a.ndim == 1:
+            out[k] = a
+        elif a.ndim == 2 and a.shape[1] == 1:
+            out[k] = a[:, 0]                  # (N,1) -> (N,)
+        elif a.ndim == 2:
+            # (N, M) -> M 列
+            for j in range(a.shape[1]):
+                out[f"{k}_{j}"] = a[:, j]
+        else:
+            # (N, …) 其他高维：把后面的维度拉平
+            flat = a.reshape(N, -1)
+            for j in range(flat.shape[1]):
+                out[f"{k}_{j}"] = flat[:, j]
+    return out
 
 def compute_metrics(data: Dict, pred_transforms) -> Dict:
     """Compute metrics required in the paper
@@ -255,7 +286,12 @@ def save_eval_data(pred_transforms, endpoints, metrics, summary_metrics, save_pa
         metrics[i_iter]['t_rmse'] = np.sqrt(metrics[i_iter]['t_mse'])
         metrics[i_iter].pop('r_mse')
         metrics[i_iter].pop('t_mse')
-        metrics_df = pd.DataFrame.from_dict(metrics[i_iter])
+        for k, v in metrics[i_iter].items():
+            a = np.asarray(v)
+            print(k, a.shape, a.ndim)  # 看看谁不是 1D
+        # metrics_df = pd.DataFrame.from_dict(metrics[i_iter])
+        _flat = _flatten_for_df(metrics[i_iter])
+        metrics_df = pd.DataFrame(_flat)
         metrics_df.to_excel(writer, sheet_name='Iter_{}'.format(i_iter+1))
     writer.close()
 
