@@ -148,11 +148,13 @@ class RPMNet(nn.Module):
         super().__init__()
         self._logger = logging.getLogger(self.__class__.__name__)
 
-        self.add_slack = not args.no_slack
-        self.num_sk_iter = args.num_sk_iter
+        self.add_slack = not args.no_slack # Sinkhorn 是否带 slack，允许“匹配不满”（应对外点/遮挡）.没传 --no_slack → args.no_slack = False → add_slack = True
+        self.num_sk_iter = args.num_sk_iter # Sinkhorn 迭代次数
 
     def compute_affinity(self, beta, feat_distance, alpha=0.5):
-        """Compute logarithm of Initial match matrix values, i.e. log(m_jk)"""
+        """
+        论文公式(3)
+        Compute logarithm of Initial match matrix values, i.e. log(m_jk)"""
         if isinstance(alpha, float):
             hybrid_affinity = -beta[:, None, None] * (feat_distance - alpha)
         else:
@@ -176,34 +178,45 @@ class RPMNet(nn.Module):
 
         xyz_ref, norm_ref = data['points_ref'][:, :, :3], data['points_ref'][:, :, 3:6]
         xyz_src, norm_src = data['points_src'][:, :, :3], data['points_src'][:, :, 3:6]
-        xyz_src_t, norm_src_t = xyz_src, norm_src
+        xyz_src_t, norm_src_t = xyz_src, norm_src # 当前迭代里用来提特征/做匹配的源点云版本（会不断被“变换后更新”）。
 
         transforms = []
         all_gamma, all_perm_matrices, all_weighted_ref = [], [], []
         all_beta, all_alpha = [], []
         for i in range(num_iter):
-
+            # 1. weights_net：a secondary network to predict optimal annealing parameters.
             beta, alpha = self.weights_net([xyz_src_t, xyz_ref])
+            # 2. 提取src和ref的特征
             feat_src = self.feat_extractor(xyz_src_t, norm_src_t)
             feat_ref = self.feat_extractor(xyz_ref, norm_ref)
-
+            # 3. 计算特征距离矩阵和初始匹配矩阵
             feat_distance = match_features(feat_src, feat_ref)
+            # affinity = -β (D - α)
             affinity = self.compute_affinity(beta, feat_distance, alpha=alpha)
 
-            # Compute weighted coordinates
+            # Compute weighted coordinates: 
+            # sinkhorn: 反复做行、列归一化使得each row or column sum to <=1
+            # 得到log(M_i)
             log_perm_matrix = sinkhorn(affinity, n_iters=self.num_sk_iter, slack=self.add_slack)
-            perm_matrix = torch.exp(log_perm_matrix)
+            # 得到第 i 次迭代的 soft assignments(final match matrix): M_i = exp(log(M_i))
+            perm_matrix = torch.exp(log_perm_matrix) # 软匹配矩阵 P ∈ ℝ^{B×J×K}
+
+            # 软对应下的“参考系目标位置”（每个源点的加权参考坐标）
+            # 对应论文公式(9)
             weighted_ref = perm_matrix @ xyz_ref / (torch.sum(perm_matrix, dim=2, keepdim=True) + _EPS)
 
-            # Compute transform and transform points
+            # Compute transform and transform points 用SVD
+            # 带权刚体：把 xyz_src（注意：是“原始源”）配准到 weighted_ref
+            # 每一轮都重新直接拟合“原始源 → 当前软目标”，得到的是绝对位姿而不是增量叠加
             transform = compute_rigid_transform(xyz_src, weighted_ref, weights=torch.sum(perm_matrix, dim=2))
+            # 用得到的刚体，去“更新”下一轮的源点云版本（只用于提特征/重新匹配）
             xyz_src_t, norm_src_t = se3.transform(transform.detach(), xyz_src, norm_src)
 
             transforms.append(transform)
-            all_gamma.append(torch.exp(affinity))
-            all_perm_matrices.append(perm_matrix)
-            all_weighted_ref.append(weighted_ref)
-            all_beta.append(to_numpy(beta))
+            all_gamma.append(torch.exp(affinity))   # 归一化前的 e^{亲和度}
+            all_perm_matrices.append(perm_matrix)    # 软匹配 P
+            all_weighted_ref.append(weighted_ref)    # 软对应得到的参考目标位置
+            all_beta.append(to_numpy(beta))          # 每轮的 β、α
             all_alpha.append(to_numpy(alpha))
 
         endpoints['perm_matrices_init'] = all_gamma

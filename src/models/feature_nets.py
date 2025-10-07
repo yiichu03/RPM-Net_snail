@@ -159,8 +159,8 @@ class FeatExtractionEarlyFusion(nn.Module):
 
         self._logger = logging.getLogger(self.__class__.__name__)
         self._logger.info('Using early fusion, feature dim = {}'.format(feature_dim))
-        self.radius = radius
-        self.n_sample = num_neighbors
+        self.radius = radius           # 球邻域半径（局部范围）
+        self.n_sample = num_neighbors  # 每个点最多取的邻居数 K，默认值64
 
         self.features = sorted(features, key=lambda f: _raw_features_order[f])
         self._logger.info('Feature extraction using features {}'.format(', '.join(self.features)))
@@ -182,15 +182,15 @@ class FeatExtractionEarlyFusion(nn.Module):
 
         """
         features = sample_and_group_multi(-1, self.radius, self.n_sample, xyz, normals)
-        features['xyz'] = features['xyz'][:, :, None, :]
+        features['xyz'] = features['xyz'][:, :, None, :] # (B, N, 3)——> (B, N, 1, 3), 后面会 broadcast 到 K 个邻居；
 
         # Gate and concat
         concat = []
-        for i in range(len(self.features)):
+        for i in range(len(self.features)): # 直接concat
             f = self.features[i]
             expanded = (features[f]).expand(-1, -1, self.n_sample, -1)
             concat.append(expanded)
-        fused_input_feat = torch.cat(concat, -1)
+        fused_input_feat = torch.cat(concat, -1) #  [B, N, n_sample, 10] ([16, 717, 64, 10])  xyz3, dxyz3, ppf4
 
         # Prepool_FC, pool, postpool-FC
         new_feat = fused_input_feat.permute(0, 3, 2, 1)  # [B, 10, n_sample, N]

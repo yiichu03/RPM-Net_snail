@@ -322,11 +322,11 @@ def main():
     test_loader = torch.utils.data.DataLoader(test_dataset,
                                               batch_size=_args.val_batch_size, shuffle=False)
 
-    if _args.transform_file is not None:
+    if _args.transform_file is not None: # 直接读取现成的.npy文件
         _logger.info('Loading from precomputed transforms: {}'.format(_args.transform_file))
         pred_transforms = np.load(_args.transform_file)
         endpoints = {}
-    else:
+    else: # 进行RPM的前向推理
         model = get_model()
         pred_transforms, endpoints = inference(test_loader, model)  # Feedforward transforms
 
