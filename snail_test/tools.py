@@ -178,3 +178,34 @@ def estimate_normals_for_radar(points: np.ndarray, k: int = 20):
     
     
     return normals, is_bad_mask
+
+def write_hyperparams_txt(out_dir, args, final_radius, auto_radius_value, defaults, device, 
+                         n_src_pts=None, n_ref_pts=None, auto_k=128, auto_pct=80, normals_k=20):
+    """
+    将本次运行的关键超参数写入 out_dir/hyperparams.txt
+    - final_radius: 实际用于特征的半径（无论是否 auto）
+    - auto_radius_value: 若使用 auto，则记录估计值；否则为 None
+    - defaults: rpmnet 的 argparse Namespace（含 num_neighbors 等）
+    """
+    lines = []
+    lines.append(f"checkpoint        = {args.resume}")
+    lines.append(f"device            = {device}")
+    lines.append(f"src_pcd           = {args.src_pcd}")
+    lines.append(f"ref_pcd           = {args.ref_pcd}")
+    if n_src_pts is not None: lines.append(f"num_points_src    = {n_src_pts}")
+    if n_ref_pts is not None: lines.append(f"num_points_ref    = {n_ref_pts}")
+    lines.append(f"save_vis          = {args.save_vis}")
+    lines.append(f"neighbors         = {defaults.num_neighbors}")
+    lines.append(f"num_iter          = {defaults.num_reg_iter}")
+    lines.append(f"auto_radius_flag  = {args.auto_radius}")
+    lines.append(f"radius_used       = {final_radius:.6f}")
+    if args.auto_radius:
+        # 这里记录 auto 的估计值与该函数的默认 k/pct，便于复现实验
+        lines.append(f"auto_radius_value = {auto_radius_value:.6f}")
+        lines.append(f"auto_radius_k     = {auto_k}")
+        lines.append(f"auto_radius_pct   = {auto_pct}")
+    lines.append(f"normals_k         = {normals_k}")
+    path = Path(out_dir) / "hyperparams.txt"
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    print(f"[info] wrote hyperparams to {path}")

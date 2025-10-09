@@ -12,7 +12,7 @@ import numpy as np
 import torch
 import open3d as o3d
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # 让同级 tools.py / convert_radar_single_frames.py 稳定可见
-from tools import save_inference_visuals, estimate_normals_for_radar
+from tools import save_inference_visuals, estimate_normals_for_radar, write_hyperparams_txt
 
 # --- utils -------------------------------------------------------------------
 
@@ -20,15 +20,20 @@ def to_tensor(x, device):
     return torch.from_numpy(x).float().to(device)
 
 
-def auto_radius(points_src, points_ref, k=16, pct=80):
-    """Estimate a reasonable feature radius from kNN distances (percentile over both clouds)."""
+def auto_radius(points_src, points_ref, k=128, pct=80):
+    """从两帧点云的 kNN 距离分布里，估一个“合适的特征半径 R”"""
     import sklearn.neighbors as skn
+    # 1) 把两帧点合在一起做一次近邻搜索，统一估尺度
     pts = np.vstack([points_src, points_ref])
+    # 2) 建 kNN 索引。为什么是 k+1？——因为每个点的最近邻里包含“自己”，距离=0
     nbrs = skn.NearestNeighbors(n_neighbors=min(k+1, len(pts))).fit(pts)
+    # 3) 查到每个点到其最近 (k+1) 个点的距离矩阵 dists，形状 (N_total, k+1)
+    #    dists[:, 0] 基本都是 0（与自身距离），dists[:, 1:] 才是“真正邻居”的距离
     dists, _ = nbrs.kneighbors(pts)
-    # skip self (0), take median of k-th neighbor
+    # 4) 粗看一下分布：取所有点、所有真实邻居的距离的中位数（只是做 isfinite 守卫）
     base = np.median(dists[:, 1:])
-    # a slightly conservative enlargement
+    # 5) 返回一个“稍微保守一点”的半径：取整体分布的 pct 分位数（默认 80% 分位）
+    #    含义：80% 的邻居距离都 ≤ 这个数。这样半径不会太小（邻居太少），也不会太大（邻域过宽）
     return float(np.percentile(dists[:, 1:], pct)) if np.isfinite(base) else 1.0
 
 
@@ -83,7 +88,7 @@ def main():
     
     args = parser.parse_args()
 
-    out_dir = args.out_dir or str(Path(ref_pcd_path).parent)
+    
 
     # device
     if torch.cuda.is_available():
@@ -98,12 +103,16 @@ def main():
 
     assert Path(src_pcd_path).exists(), f"src_pcd not found: {src_pcd_path}"
     assert Path(ref_pcd_path).exists(), f"ref_pcd not found: {ref_pcd_path}"
+    
+    out_dir = args.out_dir or str(Path(ref_pcd_path).parent)
+    os.makedirs(out_dir, exist_ok=True)
 
     xyz_src, n_src = transfer_pcd_to_data(src_pcd_path)
     xyz_ref, n_ref = transfer_pcd_to_data(ref_pcd_path)
     print(f"  Source frame {src_pcd_path}: {len(xyz_src)} points")
     print(f"  Reference frame {ref_pcd_path}: {len(xyz_ref)} points")
 
+   
 
     # build model args namespace (keep in sync with your RPMNet implementation)
     # Using EarlyFusion defaults: features include xyz, dxyz and ppf
@@ -123,6 +132,21 @@ def main():
     defaults.num_neighbors = args.neighbors
     defaults.num_reg_iter  = args.num_iter
     defaults.no_slack      = False   
+
+    final_radius = float(defaults.radius)
+
+    write_hyperparams_txt(
+        out_dir=out_dir,
+        args=args,
+        final_radius=final_radius,
+        auto_radius_value=(est_r if args.auto_radius else None),
+        defaults=defaults,
+        device=str(device),
+        n_src_pts=len(xyz_src),
+        n_ref_pts=len(xyz_ref),
+        auto_k=128, auto_pct=80,  # 与 auto_radius() 的默认一致
+        normals_k=20              # 与 estimate_normals_for_radar(..., k=20) 一致
+    )
 
     # import your project modules (assumes this script is launched from project root)
     import models.rpmnet as rpmnet_mod

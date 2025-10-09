@@ -1,6 +1,6 @@
 """
 Visualize RPM-Net registration progress (top view, XY only).
-
+仅可视化顶视图(XY)下，源点云随每次迭代对齐到参考点云的过程。
 Expected files under --results_dir:
   - pred_transforms.npy : shape (B, n_iter, 3, 4) or (n_iter, 3, 4) or (3, 4)
   - data_dict.npy       : dict with keys ['points_src', 'points_ref', ...]
@@ -8,6 +8,15 @@ Usage:
   python visualize_radar_registration.py \
       --results_dir path/to/results_dir \
       --save progress.png
+
+1.读结果
+   - Load pred_transforms.npy → normalize to shape (n_iter, 3, 4). 若为(B, n_iter, 3, 4)只取第一个样本；若为(3,4)则扩展为(1,3,4)。
+   - Load data_dict.npy → get points_src, points_ref (N×3).
+2.工具
+   - apply_transform(P, T): 应用 SE(3) 变换 T（R|t）到点集 P。
+   - rotation_deg(T): 由 trace(R) 计算合成旋转角（度）。
+   - translation_norm(T): 计算平移向量范数（米）。
+
 """
 
 import os
