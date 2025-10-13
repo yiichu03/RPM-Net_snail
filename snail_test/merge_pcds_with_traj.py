@@ -3,7 +3,8 @@
 # 功能: 读取 PCD 序列 + 轨迹(ref_tls_T_xt32.csv)，
 #       1) 合并点云到同一地图坐标系 -> merged_full.pcd
 #       2) 保存用到的位姿位置点 -> traj_points.pcd
-# python merge_pcds_with_traj.py --pcd_dir eagleg7/pcl  --traj_csv ref_trajs/fwd_bwd_loc/20231007/data4/ref_tls_T_xt32.csv  --out_pcd merged_full.pcd  --traj_points_out traj_points.pcd
+# python merge_pcds_with_traj.py --pcd_dir eagleg7/pcl  --traj_csv ref_trajs/fwd_bwd_loc/20231007/data4/ref_tls_T_oculii.csv  --out_pcd merged_full.pcd  --traj_points_out traj_points.pcd
+# 弃用python merge_pcds_with_traj.py --pcd_dir eagleg7/pcl  --traj_csv ref_trajs/fwd_bwd_loc/20231007/data4/ref_tls_T_xt32.csv  --out_pcd merged_full_wrong.pcd  --traj_points_out traj_points_wrong.pcd
 
 import argparse, os, glob
 import numpy as np
@@ -29,12 +30,12 @@ def load_traj(csv_path):
     """从 ref_tls_T_xt32.csv 读取时间、位置、姿态(四元数: x y z w)"""
     df = pd.read_csv(csv_path)
     time_col = [c for c in df.columns if 'time' in c.lower()][0]
-    pos_cols  = ['M_p_L_x','M_p_L_y','M_p_L_z']
-    quat_cols = ['M_q_L_x','M_q_L_y','M_q_L_z','M_q_L_w']
+    pos_cols  = ['M_p_O_x','M_p_O_y','M_p_O_z']
+    quat_cols = ['M_q_O_x','M_q_O_y','M_q_O_z','M_q_O_w']
     times = df[time_col].to_numpy(float)
-    M_p_L   = df[pos_cols].to_numpy(float)
-    M_q_L  = df[quat_cols].to_numpy(float)
-    return times, M_p_L, M_q_L
+    M_p_O   = df[pos_cols].to_numpy(float)
+    M_q_O  = df[quat_cols].to_numpy(float)
+    return times, M_p_O, M_q_O
 
 def list_pcds(pcd_dir):
     files = sorted(glob.glob(os.path.join(pcd_dir, '*.pcd')))
@@ -81,7 +82,7 @@ def main():
     ap.add_argument('--time_tolerance', type=float, default=0.05, help='允许的最近邻时间差(秒)')
     args = ap.parse_args()
 
-    traj_t, traj_M_p_L, traj_M_q_L = load_traj(args.traj_csv) # times, pos位置, quat姿态
+    traj_t, traj_M_p_O, traj_M_q_O = load_traj(args.traj_csv) # times, pos位置, quat姿态
     pcd_files, pcd_ts = list_pcds(args.pcd_dir)
 
     # 最近邻时间配对
@@ -96,8 +97,8 @@ def main():
         if dt[i] > args.time_tolerance:
             print(f'[跳过] {os.path.basename(f)} 时间差 {dt[i]:.3f}s 超过容差')
             continue
-        t = traj_M_p_L[nn_idx[i]]
-        q = traj_M_q_L[nn_idx[i]]
+        t = traj_M_p_O[nn_idx[i]]
+        q = traj_M_q_O[nn_idx[i]]
         R = quat_xyzw_to_R(q)
 
         pc = o3d.io.read_point_cloud(f)
