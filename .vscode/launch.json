@@ -34,22 +34,24 @@
             "name": "Infer single pair (PCD→RPMNet)",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/snail_test/infer_from_pcd.py",
+            "program": "${workspaceFolder}/snail_test/infer_from_pcd2.py",
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "justMyCode": false,
-            "args": [
-                "--src_pcd", "${workspaceFolder}/snail_test/eagleg7/enhanced/1696641884.835595373.pcd",
-                "--ref_pcd", "${workspaceFolder}/snail_test/eagleg7/enhanced/1696641886.295488599.pcd",
-                // "--ref_pcd", "${workspaceFolder}/snail_test/outputs/1696641899.575806383/1696641899.575806383_R_45.0_45.0_15.0_T_20.0_30.0_0.5.pcd",
+            "args": [ 
+                "--src_pcd", "${workspaceFolder}/snail_test/eagleg7/enhanced/1696641919.088185791.pcd",
+                "--ref_pcd", "${workspaceFolder}/snail_test/eagleg7/enhanced/1696641920.018239740.pcd",
+                // "--ref_pcd", "${workspaceFolder}/snail_test/outputs/1696641884.835595373_2/1696641884.835595373_R_45.0_45.0_15.0_T_20.0_30.0_0.5.pcd",
                 "--resume", "D:/AA_projects_in_nus/nus/deep_sparse_radar_odometry/code/checkpoints/partial-trained.pth",
+                // "--resume", "D:/AA_projects_in_nus/nus/deep_sparse_radar_odometry/code/checkpoints/noisy-trained.pth",
                 "--num_iter", "5", // "5",
-                "--auto_radius",
-                // "--radius", "0.3",
-                "--neighbors", "30", // 30 50
+                // "--auto_radius",
+                "--radius", "0.3",
+                "--neighbors", "30", // 30 50 default=64
                 "--save_vis",
-                "--out_dir", "${workspaceFolder}/snail_test/outputs/pair_1696641884_1696641886"
-                // "--out_dir", "${workspaceFolder}/snail_test/outputs/1696641899.575806383"
+                "--out_dir", "${workspaceFolder}/snail_test/outputs/enhanced_pair_1696641919_1696641920_withgt",
+                // "--out_dir", "${workspaceFolder}/snail_test/outputs/1696641884.835595373_2"
+                "--traj_csv", "${workspaceFolder}/snail_test/ref_trajs/fwd_bwd_loc/20231007/data4/ref_tls_T_oculii.csv"
             ]
         },
         {
@@ -61,10 +63,9 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "args": [
-                "--results_dir", "${workspaceFolder}/snail_test/outputs/pair_1696641884_1696641886",
-                // "--results_dir", "${workspaceFolder}/snail_test/outputs/1696641899.575806383",
-                // "--mode", "progress", // "progress" 'matching' 'comparison' '3d'
-                "--save", "${workspaceFolder}/snail_test/outputs/pair_1696641884_1696641886/progress.png"
+                // "--results_dir", "${workspaceFolder}/snail_test/outputs/pair_1696641884_1696641906",
+                "--results_dir", "${workspaceFolder}/snail_test/outputs/enhanced_pair_1696641919_1696641920_withgt",
+                "--save", "${workspaceFolder}/snail_test/outputs/enhanced_pair_1696641919_1696641920_withgt/progress.png"
             ]
         },
         {

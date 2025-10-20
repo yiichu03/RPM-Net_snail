@@ -54,6 +54,49 @@ def load_results(results_dir: str):
 
     return tr, pts_src, pts_ref
 
+def load_gt_transform(gt_path: str) -> np.ndarray:
+    """
+    从 gt_ref_T_src.txt 读取 T_gt (4x4)。优先解析 'T_4x4=' 块；若缺失则退化为解析 R 和 t。
+    返回: np.ndarray(4,4)，若失败抛出异常。
+    """
+    with open(gt_path, "r", encoding="utf-8") as f:
+        lines = [ln.strip() for ln in f.readlines()]
+
+    # 优先找 T_4x4=
+    for i, ln in enumerate(lines):
+        if ln.startswith("T_4x4"):
+            vals = []
+            for j in range(1, 5):
+                parts = lines[i + j].split()
+                vals.append([float(x) for x in parts])
+            T = np.array(vals, dtype=float)
+            if T.shape == (4, 4):
+                return T
+
+    # 退化解析 R= + t=
+    R = []
+    t = None
+    i = 0
+    while i < len(lines):
+        if lines[i].startswith("R="):
+            R = []
+            for j in range(1, 4):
+                R.append([float(x) for x in lines[i + j].split()])
+            i += 4
+        elif lines[i].startswith("t="):
+            t = [float(x) for x in lines[i + 1].split()]
+            i += 2
+        else:
+            i += 1
+
+    if len(R) == 3 and t is not None:
+        T = np.eye(4, dtype=float)
+        T[:3, :3] = np.array(R, dtype=float)
+        T[:3, 3] = np.array(t, dtype=float)
+        return T
+
+    raise ValueError(f"无法从 {gt_path} 解析到 T_4x4 或 R/t")
+
 
 def apply_transform(points: np.ndarray, T: np.ndarray) -> np.ndarray:
     """Apply SE3 transform T (3x4 or 4x4) to Nx3 points."""
@@ -81,7 +124,8 @@ def plot_progress(transforms: np.ndarray,
                   pts_src: np.ndarray,
                   pts_ref: np.ndarray,
                   save_path: str = None,
-                  cols: int = 3):
+                  cols: int = 3,
+                  T_gt: np.ndarray = None):
     """
     Plot initial (before) + each iteration result in a grid.
     - transforms: (n_iter, 3, 4)
@@ -122,7 +166,24 @@ def plot_progress(transforms: np.ndarray,
 
         ax.scatter(src_aligned[:, 0], src_aligned[:, 1], s=3, c="green", alpha=0.6, label="Aligned Source")
         ax.scatter(pts_ref[:, 0], pts_ref[:, 1], s=3, c="blue", alpha=0.6, label="Reference")
-        ax.set_title(f"Iter {i + 1}\nRot: {rotation_deg(T):.2f}°, Trans: {translation_norm(T):.3f} m")
+        title = f"Iter {i + 1}\nRot: {rotation_deg(T):.2f}°, Trans: {translation_norm(T):.3f} m"
+                
+        # 仅在最后一张叠加 GT（如果提供了）
+        if (T_gt is not None) and (i == n_iter - 1):
+            title +=  f"\n predict R : {np.array2string(T[:3, :3], precision=3)}, \npredict T : {np.array2string(T[:3, 3], precision=3)}"
+
+            print("[info] Overlaying GT transform in the last panel.")
+            src_gt = apply_transform(pts_src, T_gt)  # ref_T_src (GT)
+            ax.scatter(src_gt[:, 0], src_gt[:, 1], s=3, c="orange", alpha=0.6, label="Source (GT)")
+
+            rot_gt = rotation_deg(T_gt)
+            trans_gt = translation_norm(T_gt)
+
+            title += f"\nGT Rot: {rot_gt:.2f}°, GT Trans: {trans_gt:.3f} m"
+            title +=  f"\nGT R : {np.array2string(T_gt[:3, :3], precision=3)}, \nGT T : {np.array2string(T_gt[:3, 3], precision=3)}"
+
+
+        ax.set_title(title)
         ax.legend()
         ax.set_aspect("equal")
         ax.grid(True, alpha=0.3)
@@ -147,11 +208,25 @@ def main():
     parser.add_argument("--save", type=str, default=None,
                         help="Optional path to save the figure (e.g., progress.png)")
     parser.add_argument("--cols", type=int, default=3, help="可视化：子图网格一行放几个面板")
+    parser.add_argument("--gt_txt", type=str, default=None,
+                        help="可选：gt_ref_T_src.txt 路径；若未给则尝试从 results_dir 自动查找")
+
     args = parser.parse_args()
 
     tr, pts_src, pts_ref = load_results(args.results_dir)
+
+    T_gt = None
+    gt_path = args.gt_txt or os.path.join(args.results_dir, "gt_ref_T_src.txt")
+    if os.path.exists(gt_path):
+        try:
+            T_gt = load_gt_transform(gt_path)
+            print(f"[load] GT transform loaded from: {gt_path}")
+        except Exception as e:
+            print(f"[warn] 读取 GT 失败（忽略，仅显示预测）：{e}")
+
     print(f"[load] transforms: {tr.shape}, src: {pts_src.shape}, ref: {pts_ref.shape}")
-    plot_progress(tr, pts_src, pts_ref, save_path=args.save, cols=args.cols)
+    plot_progress(tr, pts_src, pts_ref, save_path=args.save, cols=args.cols, T_gt=T_gt)
+
 
 
 if __name__ == "__main__":

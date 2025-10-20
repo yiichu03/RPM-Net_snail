@@ -5,10 +5,24 @@ import numpy as np
 import torch
 import open3d as o3d
 
-# 可选：也可以把这些放到函数内部 import
 import pickle
 from scipy import sparse
 
+def auto_radius(points_src, points_ref, k=128, pct=80):
+    """从两帧点云的 kNN 距离分布里，估一个“合适的特征半径 R”"""
+    import sklearn.neighbors as skn
+    # 1) 把两帧点合在一起做一次近邻搜索，统一估尺度
+    pts = np.vstack([points_src, points_ref])
+    # 2) 建 kNN 索引。为什么是 k+1？——因为每个点的最近邻里包含“自己”，距离=0
+    nbrs = skn.NearestNeighbors(n_neighbors=min(k+1, len(pts))).fit(pts)
+    # 3) 查到每个点到其最近 (k+1) 个点的距离矩阵 dists，形状 (N_total, k+1)
+    #    dists[:, 0] 基本都是 0（与自身距离），dists[:, 1:] 才是“真正邻居”的距离
+    dists, _ = nbrs.kneighbors(pts)
+    # 4) 粗看一下分布：取所有点、所有真实邻居的距离的中位数（只是做 isfinite 守卫）
+    base = np.median(dists[:, 1:])
+    # 5) 返回一个“稍微保守一点”的半径：取整体分布的 pct 分位数（默认 80% 分位）
+    #    含义：80% 的邻居距离都 ≤ 这个数。这样半径不会太小（邻居太少），也不会太大（邻域过宽）
+    return float(np.percentile(dists[:, 1:], pct)) if np.isfinite(base) else 1.0
 
 def apply_se3(xyz, T):
     """xyz: (N,3) numpy, T: (3,4)  torch/numpy -> (N,3) numpy"""
@@ -34,11 +48,13 @@ def save_inference_visuals(
     save_perm: bool = True,     # 是否保存稀疏化的软匹配矩阵
     save_ply: bool = True,      # 保存前/后的 PLY 点云
     save_data_dict: bool = True,# 保存原始数据字典 numpy
-    print_report: bool = True   # 打印 R/t 概要
+    print_report: bool = True,   # 打印 R/t 概要
+    gt_transform=None
 ):
     """
     打包：保存 pred_transforms.npy、(可选) perm_matrices.pickle、(可选) pair_before/after.ply、
          (可选) data_dict.npy、T_src{src}_ref{ref}.txt，并返回关键信息。
+    gt_transform: Optional[Tuple[np.ndarray(3,3), np.ndarray(3,)]]，若提供则在最终图中叠加 src(经GT)
     """
     import os
     import pickle
@@ -110,8 +126,20 @@ def save_inference_visuals(
         xyz_src_aligned = apply_se3(xyz_src, T_last)
         p_src2 = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(xyz_src_aligned))
         p_src2.paint_uniform_color([1, 0.2, 0.2])
+        
+        if gt_transform is not None:
+            R_gt, t_gt = gt_transform
+            src_gt = xyz_src @ R_gt.T + t_gt
+            p_src_gt = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(src_gt))
+            p_src_gt.paint_uniform_color([0.2, 0.9, 0.2])  # 绿：src(GT 对齐)
+            cloud_after = p_ref + p_src2 + p_src_gt
+        else:
+            cloud_after = p_ref + p_src2
+
         ply_after_path = os.path.join(out_dir, 'pair_after.ply')
-        o3d.io.write_point_cloud(ply_after_path, p_src2 + p_ref)
+        o3d.io.write_point_cloud(ply_after_path, cloud_after)
+
+        
 
     # 5) 保存最后一次 T 为 txt（便于快速查看）
     T_txt_path = os.path.join(out_dir, f"T_src{src_idx}_ref{ref_idx}.txt")
@@ -128,7 +156,19 @@ def save_inference_visuals(
         print("R (3x3):\n", R)
         print("t (m): ", t)
         print(f"rotation = {rot_deg:.3f} deg, translation = {t_norm:.3f} m")
-
+    if print_report and (gt_transform is not None):
+        R_pred = T_last[:, :3]; t_pred = T_last[:, 3]
+        R_gt, t_gt = gt_transform
+        print("--- GT (ref_T_src) ---")
+        print("R_gt (3x3):\n", R_gt)
+        print("t_gt (m): ", t_gt)
+        R_delta = R_gt.T @ R_pred
+        tr = np.trace(R_delta)
+        rot_err_rad = np.arccos(np.clip((tr - 1.0) * 0.5, -1.0, 1.0))
+        rot_err_deg = float(rot_err_rad * 180.0 / np.pi)
+        trans_err = float(np.linalg.norm(t_pred - t_gt))
+        print(f"--- vs GT ---")
+        print(f"rot_err = {rot_err_deg:.3f} deg, trans_err = {trans_err:.3f} m")
     return {
         'pred_transforms_npy': os.path.join(out_dir, 'pred_transforms.npy'),
         'perm_pickle': perm_pickle_path,

@@ -3,6 +3,7 @@
 # ===============================================
 # Radar PCD files and converted data
 snail_test/eagleg7/
+snail_test/outputs/
 snail_test/radar_single_frames/
 snail_test/radar_single_frames_original/
 snail_test/radar_full_sequence/
@@ -13,6 +14,8 @@ snail_test/*.pcd
 synthetic_partial/
 synthetic_test/
 snail_test/outputs/
+snail_test/full_trajs/
+snail_test/ref_trajs/
 
 # ModelNet40 dataset
 datasets/modelnet40_ply_hdf5_2048/

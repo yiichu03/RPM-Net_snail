@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # merge_pcds_with_traj.py
 # 功能: 读取 PCD 序列 + 轨迹(ref_tls_T_xt32.csv)，
 #       1) 合并点云到同一地图坐标系 -> merged_full.pcd
@@ -10,29 +9,21 @@ import argparse, os, glob
 import numpy as np
 import pandas as pd
 import open3d as o3d
-
-# ---- math ----
-def quat_xyzw_to_R(q):
+from scipy.spatial.transform import Rotation as R
+import bisect
+def R_from_q(q):
+    '''
+    由四元数得到旋转矩阵'''
     q = np.asarray(q, float)
     q /= np.linalg.norm(q) + 1e-12
-    x,y,z,w = q
-    xx,yy,zz = x*x, y*y, z*z
-    xy,xz,yz = x*y, x*z, y*z
-    wx,wy,wz = w*x, w*y, w*z
-    return np.array([
-        [1-2*(yy+zz),   2*(xy-wz),   2*(xz+wy)],
-        [  2*(xy+wz), 1-2*(xx+zz),   2*(yz-wx)],
-        [  2*(xz-wy),   2*(yz+wx), 1-2*(xx+yy)]
-    ], float)
+    return R.from_quat(q).as_matrix()
 
-# ---- IO ----
 def load_traj(csv_path):
-    """从 ref_tls_T_xt32.csv 读取时间、位置、姿态(四元数: x y z w)"""
+    '''从ref_tls_T_oculii.csv读取时间、位置、姿态(四元数: x y z w)'''
     df = pd.read_csv(csv_path)
-    time_col = [c for c in df.columns if 'time' in c.lower()][0]
+    times = df['time'].to_numpy(float)
     pos_cols  = ['M_p_O_x','M_p_O_y','M_p_O_z']
     quat_cols = ['M_q_O_x','M_q_O_y','M_q_O_z','M_q_O_w']
-    times = df[time_col].to_numpy(float)
     M_p_O   = df[pos_cols].to_numpy(float)
     M_q_O  = df[quat_cols].to_numpy(float)
     return times, M_p_O, M_q_O
@@ -44,39 +35,31 @@ def list_pcds(pcd_dir):
     # 默认从文件名解析时间戳（形如 1696641886.183674812.pcd）
     ts = []
     for f in files:
-        try: ts.append(float(os.path.splitext(os.path.basename(f))[0]))
-        except: ts.append(np.nan)
+        ts.append(float(os.path.splitext(os.path.basename(f))[0]))
     ts = np.array(ts, float)
-    if np.isnan(ts).any():
-        bad = [files[i] for i in np.where(np.isnan(ts))[0][:5]]
-        raise ValueError(f'有文件名不是时间戳，示例: {bad}')
     return files, ts
 
 def nearest_indices(query, base):
-    """对已排序时间轴 base，为每个 query 找最近邻nearest neighbor索引
-    先用二分锁定左右邻，再比距离选更近的那个索引
-    query: pcd_ts
-    base: traj_t
-    """
-    # 二分：找到把 query 插入 base 后仍保持有序的位置
-    # 语义：base[idx-1] <= query < base[idx]
-    idx = np.searchsorted(base, query)
-    # 处理边界，保证后面访问 idx-1 和 idx 不越界
-    idx = np.clip(idx, 1, len(base)-1)
-    # 最近邻只可能是左邻或右邻
-    left, right = idx-1, idx
-    # 比较到左右邻的距离；距离相等时偏向左（<=）
-    choose_left = (np.abs(base[left]-query) <= np.abs(base[right]-query))
-    # 按位选择：True 选 left，False 选 right
-    idx_nn = np.where(choose_left, left, right)
-    
-    return idx_nn
+    """ 二分查找 base 必须升序。用 bisect 在 O(log N) 找左右邻，再比谁更近。"""
+    base = list(base)  # bisect 需要序列
+    out = []
+    for q in query:
+        j = bisect.bisect_left(base, q)            # base[j-1] <= q < base[j]
+        if j == 0: 
+            out.append(0)
+        elif j == len(base):
+            out.append(len(base)-1)
+        else:
+            left, right = j-1, j
+            # 距离相等时偏向左邻（<=）
+            i = left if abs(base[left]-q) <= abs(base[right]-q) else right
+            out.append(i)
+    return np.array(out, dtype=int)
 
-# ---- main ----
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--pcd_dir', required=True, help='PCD 序列目录 (pcl/ 或 enhanced/)')
-    ap.add_argument('--traj_csv', required=True, help='ref_tls_T_xt32.csv 路径')
+    ap.add_argument('--traj_csv', required=True, help='ref_tls_T_oculii.csv 路径')
     ap.add_argument('--out_pcd', default='merged_full.pcd', help='合并点云输出文件名')
     ap.add_argument('--traj_points_out', default='traj_points.pcd', help='轨迹位置点输出文件名')
     ap.add_argument('--time_tolerance', type=float, default=0.05, help='允许的最近邻时间差(秒)')
@@ -86,53 +69,53 @@ def main():
     pcd_files, pcd_ts = list_pcds(args.pcd_dir)
 
     # 最近邻时间配对
-    nn_idx = nearest_indices(pcd_ts, traj_t)
-    dt = np.abs(traj_t[nn_idx] - pcd_ts) # 轨迹的时间戳和pcd的时间戳的差
+    idx_nn = nearest_indices(pcd_ts, traj_t)
+    time_diffs = np.abs(pcd_ts - traj_t[idx_nn]) # 轨迹和pcd的时间戳的差值
 
-    all_xyz = []
-    pose_pts = []
+    all_xyz = []  # 用于合并的点云
+    pose_points = []  # 用于保存轨迹位置点
     used = 0
 
     for i, f in enumerate(pcd_files):
-        if dt[i] > args.time_tolerance:
-            print(f'[跳过] {os.path.basename(f)} 时间差 {dt[i]:.3f}s 超过容差')
+        if time_diffs[i] > args.time_tolerance:
+            print(f'跳过 {os.path.basename(f)}，时间差 {time_diffs[i]:.3f}s 超过容限 {args.time_tolerance}s')
             continue
-        t = traj_M_p_O[nn_idx[i]]
-        q = traj_M_q_O[nn_idx[i]]
-        R = quat_xyzw_to_R(q)
+        p = traj_M_p_O[idx_nn[i]]
+        q = traj_M_q_O[idx_nn[i]]
+        w_R_o = R_from_q(q) 
+        w_t_o = p           
 
         pc = o3d.io.read_point_cloud(f)
         if len(pc.points) == 0:
             continue
         xyz = np.asarray(pc.points, float) # 坐标
-        xyz_M = (xyz @ R.T) + t # (N_i, 3)（N_i 为该帧点数）
-        # list: 每个元素(N_i, 3)
-        all_xyz.append(xyz_M)
-        # list: 每个元素(3,)
-        pose_pts.append(t) # 记录位置点
+        xyz_cur = (xyz @ w_R_o.T) + w_t_o # 行向量 (N_i, 3)（N_i 为该帧点数）
+        all_xyz.append(xyz_cur)
+        pose_points.append(p) # 记录位置点
         used += 1
         if used % 200 == 0:
             print(f'已处理 {used} 帧...')
-
+    
     if used == 0:
-        raise RuntimeError('没有任何帧通过时间容差筛选，请检查时间或放宽 --time_tolerance')
-
+        print('未处理任何帧，退出')
+        return
+    
     # 保存合并点云
-    merged = o3d.geometry.PointCloud()
+    merged_pc = o3d.geometry.PointCloud()
     # np.vstack(...) 把它们纵向拼成一个大 M×3 数组。
-    merged.points = o3d.utility.Vector3dVector(np.vstack(all_xyz))
-    o3d.io.write_point_cloud(args.out_pcd, merged)
+    merged_pc.points = o3d.utility.Vector3dVector(np.vstack(all_xyz))
+    o3d.io.write_point_cloud(args.out_pcd, merged_pc)
 
     # 保存轨迹位置点
-    pose_pts = np.vstack(pose_pts) # (used, 3)
-    traj_pts = o3d.geometry.PointCloud()
-    traj_pts.points = o3d.utility.Vector3dVector(pose_pts)
-    traj_pts.paint_uniform_color([0.0, 0.0, 1.0]) # 蓝色
-    o3d.io.write_point_cloud(args.traj_points_out, traj_pts)
+    traj_points = o3d.geometry.PointCloud()
+    traj_points.points = o3d.utility.Vector3dVector(np.vstack(pose_points))
+    traj_points.paint_uniform_color([0.0, 0.0, 1.0]) # 蓝色
+    o3d.io.write_point_cloud(args.traj_points_out, traj_points)
 
     print(f'[完成] 使用 {used}/{len(pcd_files)} 帧')
-    print(f'[输出] 合并点云 -> {args.out_pcd}  点数={np.asarray(merged.points).shape[0]}')
-    print(f'[输出] 轨迹位置点 -> {args.traj_points_out}  点数={np.asarray(traj_pts.points).shape[0]}')
+    print(f'[输出] 合并点云 -> {args.out_pcd}  点数={np.asarray(merged_pc.points).shape[0]}')
+    print(f'[输出] 轨迹位置点 -> {args.traj_points_out}  点数={np.asarray(traj_points.points).shape[0]}')
 
 if __name__ == '__main__':
     main()
+
