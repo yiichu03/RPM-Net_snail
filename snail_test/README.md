@@ -1,4 +1,4 @@
-# Radar Point Cloud Registration Tools
+# 在snail_radar数据上试试RPMNet
 
 以下是主要脚本的功能介绍和使用方法。
 
@@ -9,6 +9,8 @@
 
 - 点云数据（PCD文件）: 我放在了 `snail_test/eagleg7/pcl/` ,`snail_test/eagleg7/enhanced/`
 - 轨迹数据（CSV文件）: 我放在了`snail_test/ref_trajs`
+
+轨迹文件是用来提供一个参考的两帧点云之间的变换，帮助评估RPMNet的配准效果。
 
 ## 主要工具
 
@@ -32,7 +34,7 @@ python infer_from_pcd.py --resume path/to/model.pth --src_pcd path/to/source.pcd
 - `--neighbors`: 每个点的邻居数量
 - `--num_iter`: RPMNet注册迭代次数
 
-> auto_radius是之前gpt建议的，但是我看他和直接设置radius的效果是差不多，所以直接按照RPMNet原本的设置一个radius值（或者就直接用他给的默认值）就可以
+> auto_radius是之前gpt建议的，但是我看他好像和直接设置radius的效果是差不多的，所以直接按照RPMNet原本的设置一个radius值（或者就直接用他给的默认值）就可以
 
 
 ### 2. 一次运行多对的脚本 (run_pairs.py)
