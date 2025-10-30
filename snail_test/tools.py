@@ -8,6 +8,9 @@ import open3d as o3d
 import pickle
 from scipy import sparse
 
+_ESTIMATE_NORMALS_COUNTER = 0
+_ESTIMATE_NORMALS_PERIOD = 20
+
 def auto_radius(points_src, points_ref, k=128, pct=80):
     """从两帧点云的 kNN 距离分布里，估一个“合适的特征半径 R”"""
     import sklearn.neighbors as skn
@@ -197,6 +200,7 @@ def estimate_normals_for_radar(points: np.ndarray, k: int = 20):
         return normals, is_bad_mask
     
     # KNN→PCA→取最小特征向量（Open3D 的 estimate_normals 内部完成）
+    global _ESTIMATE_NORMALS_COUNTER
     pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points.astype(np.float64)))
     k_eff = max(3, min(k, N)) # 确保KNN邻居数>=3且<=N
     pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=k_eff))
@@ -205,11 +209,13 @@ def estimate_normals_for_radar(points: np.ndarray, k: int = 20):
     
     is_bad_mask = (~np.isfinite(normals).all(axis=1)) | (np.linalg.norm(normals, axis=1) < 1e-12)
     bad_cnt = int(is_bad_mask.sum())
-    if bad_cnt > 0:
-        print(f"[estimate_normals] N={N}, k_eff={k_eff} -> bad_normals={bad_cnt}/{N} "
-              f"({bad_cnt / N:.2%}), criterion: non-finite or ||n||< 1e-12")
-    else:
-        print(f"[estimate_normals] N={N}, k_eff={k_eff} -> bad_normals=0/{N}")
+    if _ESTIMATE_NORMALS_COUNTER % _ESTIMATE_NORMALS_PERIOD == 0:
+        if bad_cnt > 0:
+            print(f"[estimate_normals] N={N}, k_eff={k_eff} -> bad_normals={bad_cnt}/{N} "
+                  f"({bad_cnt / N:.2%}), criterion: non-finite or ||n||< 1e-12")
+        else:
+            print(f"[estimate_normals] N={N}, k_eff={k_eff} -> bad_normals=0/{N}")
+    _ESTIMATE_NORMALS_COUNTER += 1
     
     # # 把非有限/几乎为零的法线替换为随机单位向量（如果想这样的话，就把下面三行代码取消注释）
     # r = np.random.randn(bad_cnt.sum(), 3).astype(np.float32)
